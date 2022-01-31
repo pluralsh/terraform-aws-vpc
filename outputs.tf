@@ -69,6 +69,11 @@ output "vpc_owner_id" {
 }
 
 output "private_subnets" {
+  description = "List of private subnets"
+  value       = aws_subnet.private[*]
+}
+
+output "private_subnets_ids" {
   description = "List of IDs of private subnets"
   value       = aws_subnet.private[*].id
 }
@@ -114,6 +119,11 @@ output "worker_private_subnets_ipv6_cidr_blocks" {
 }
 
 output "public_subnets" {
+  description = "List of public subnets"
+  value       = aws_subnet.public[*]
+}
+
+output "public_subnets_ids" {
   description = "List of IDs of public subnets"
   value       = aws_subnet.public[*].id
 }
