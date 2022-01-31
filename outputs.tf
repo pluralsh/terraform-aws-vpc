@@ -88,6 +88,31 @@ output "private_subnets_ipv6_cidr_blocks" {
   value       = aws_subnet.private[*].ipv6_cidr_block
 }
 
+output "worker_private_subnets" {
+  description = "List of worker private subnets"
+  value       = aws_subnet.worker_private[*]
+}
+
+output "worker_private_subnets_ids" {
+  description = "List of IDs of worker private subnets"
+  value       = aws_subnet.worker_private[*].id
+}
+
+output "worker_private_subnet_arns" {
+  description = "List of ARNs of worker private subnets"
+  value       = aws_subnet.worker_private[*].arn
+}
+
+output "worker_private_subnets_cidr_blocks" {
+  description = "List of cidr_blocks of worker private subnets"
+  value       = aws_subnet.worker_private[*].cidr_block
+}
+
+output "worker_private_subnets_ipv6_cidr_blocks" {
+  description = "List of IPv6 cidr_blocks of worker private subnets in an IPv6 enabled VPC"
+  value       = aws_subnet.worker_private[*].ipv6_cidr_block
+}
+
 output "public_subnets" {
   description = "List of IDs of public subnets"
   value       = aws_subnet.public[*].id
@@ -243,14 +268,19 @@ output "private_route_table_ids" {
   value       = aws_route_table.private[*].id
 }
 
+output "worker_private_route_table_ids" {
+  description = "List of IDs of worker private route tables"
+  value       = aws_route_table.worker_private[*].id
+}
+
 output "database_route_table_ids" {
   description = "List of IDs of database route tables"
-  value       = try(coalescelist(aws_route_table.database[*].id, aws_route_table.private[*].id), [])
+  value       = try(coalescelist(aws_route_table.database[*].id, aws_route_table.private[*].id, aws_route_table.worker_private[*].id), [])
 }
 
 output "redshift_route_table_ids" {
   description = "List of IDs of redshift route tables"
-  value       = length(aws_route_table.redshift[*].id) > 0 ? aws_route_table.redshift[*].id : (var.enable_public_redshift ? aws_route_table.public[*].id : aws_route_table.private[*].id)
+  value       = length(aws_route_table.redshift[*].id) > 0 ? aws_route_table.redshift[*].id : (var.enable_public_redshift ? aws_route_table.public[*].id : coalescelist(aws_route_table.private[*].id, aws_route_table.worker_private[*].id))
 }
 
 output "elasticache_route_table_ids" {
@@ -293,14 +323,29 @@ output "private_nat_gateway_route_ids" {
   value       = aws_route.private_nat_gateway[*].id
 }
 
+output "worker_private_nat_gateway_route_ids" {
+  description = "List of IDs of the worker private nat gateway route"
+  value       = aws_route.worker_private_nat_gateway[*].id
+}
+
 output "private_ipv6_egress_route_ids" {
   description = "List of IDs of the ipv6 egress route"
   value       = aws_route.private_ipv6_egress[*].id
 }
 
+output "worker_private_ipv6_egress_route_ids" {
+  description = "List of IDs of the ipv6 egress route"
+  value       = aws_route.worker_private_ipv6_egress[*].id
+}
+
 output "private_route_table_association_ids" {
   description = "List of IDs of the private route table association"
   value       = aws_route_table_association.private[*].id
+}
+
+output "worker_private_route_table_association_ids" {
+  description = "List of IDs of the worker private route table association"
+  value       = aws_route_table_association.worker_private[*].id
 }
 
 output "database_route_table_association_ids" {
@@ -458,9 +503,19 @@ output "private_network_acl_id" {
   value       = try(aws_network_acl.private[0].id, "")
 }
 
+output "worker_private_network_acl_id" {
+  description = "ID of the worker private network ACL"
+  value       = try(aws_network_acl.worker_private[0].id, "")
+}
+
 output "private_network_acl_arn" {
   description = "ARN of the private network ACL"
   value       = try(aws_network_acl.private[0].arn, "")
+}
+
+output "worker_private_network_acl_arn" {
+  description = "ARN of the worker private network ACL"
+  value       = try(aws_network_acl.worker_private[0].arn, "")
 }
 
 output "outpost_network_acl_id" {

@@ -1,6 +1,7 @@
 locals {
   max_subnet_length = max(
     length(var.private_subnets),
+    length(var.worker_private_subnets),
     length(var.elasticache_subnets),
     length(var.database_subnets),
     length(var.redshift_subnets),
@@ -239,6 +240,28 @@ resource "aws_route_table" "private" {
 }
 
 ################################################################################
+# Worker Private routes
+# There are as many routing tables as the number of NAT gateways
+################################################################################
+
+resource "aws_route_table" "worker_private" {
+  count = var.create_vpc && local.max_subnet_length > 0 ? local.nat_gateway_count : 0
+
+  vpc_id = local.vpc_id
+
+  tags = merge(
+    {
+      "Name" = var.single_nat_gateway ? "${var.name}-${var.worker_private_subnet_suffix}" : format(
+        "${var.name}-${var.worker_private_subnet_suffix}-%s",
+        element(var.azs, count.index),
+      )
+    },
+    var.tags,
+    var.worker_private_route_table_tags,
+  )
+}
+
+################################################################################
 # Database routes
 ################################################################################
 
@@ -395,6 +418,33 @@ resource "aws_subnet" "private" {
     },
     var.tags,
     var.private_subnet_tags,
+  )
+}
+
+################################################################################
+# Worker private subnet
+################################################################################
+
+resource "aws_subnet" "worker_private" {
+  count = var.create_vpc && length(var.worker_private_subnets) > 0 ? length(var.worker_private_subnets) : 0
+
+  vpc_id                          = local.vpc_id
+  cidr_block                      = var.worker_private_subnets[count.index]
+  availability_zone               = length(regexall("^[a-z]{2}-", element(var.azs, count.index))) > 0 ? element(var.azs, count.index) : null
+  availability_zone_id            = length(regexall("^[a-z]{2}-", element(var.azs, count.index))) == 0 ? element(var.azs, count.index) : null
+  assign_ipv6_address_on_creation = var.worker_private_subnet_assign_ipv6_address_on_creation == null ? var.assign_ipv6_address_on_creation : var.worker_private_subnet_assign_ipv6_address_on_creation
+
+  ipv6_cidr_block = var.enable_ipv6 && length(var.worker_private_subnet_ipv6_prefixes) > 0 ? cidrsubnet(aws_vpc.this[0].ipv6_cidr_block, 8, var.worker_private_subnet_ipv6_prefixes[count.index]) : null
+
+  tags = merge(
+    {
+      "Name" = format(
+        "${var.name}-${var.worker_private_subnet_suffix}-%s",
+        element(var.azs, count.index),
+      )
+    },
+    var.tags,
+    var.worker_private_subnet_tags,
   )
 }
 
@@ -734,6 +784,57 @@ resource "aws_network_acl_rule" "private_outbound" {
 }
 
 ################################################################################
+# Worker Private Network ACLs
+################################################################################
+
+resource "aws_network_acl" "worker_private" {
+  count = var.create_vpc && var.worker_private_dedicated_network_acl && length(var.worker_private_subnets) > 0 ? 1 : 0
+
+  vpc_id     = local.vpc_id
+  subnet_ids = aws_subnet.worker_private[*].id
+
+  tags = merge(
+    { "Name" = "${var.name}-${var.worker_private_subnet_suffix}" },
+    var.tags,
+    var.worker_private_acl_tags,
+  )
+}
+
+resource "aws_network_acl_rule" "worker_private_inbound" {
+  count = var.create_vpc && var.worker_private_dedicated_network_acl && length(var.worker_private_subnets) > 0 ? length(var.worker_private_inbound_acl_rules) : 0
+
+  network_acl_id = aws_network_acl.worker_private[0].id
+
+  egress          = false
+  rule_number     = var.worker_private_inbound_acl_rules[count.index]["rule_number"]
+  rule_action     = var.worker_private_inbound_acl_rules[count.index]["rule_action"]
+  from_port       = lookup(var.worker_private_inbound_acl_rules[count.index], "from_port", null)
+  to_port         = lookup(var.worker_private_inbound_acl_rules[count.index], "to_port", null)
+  icmp_code       = lookup(var.worker_private_inbound_acl_rules[count.index], "icmp_code", null)
+  icmp_type       = lookup(var.worker_private_inbound_acl_rules[count.index], "icmp_type", null)
+  protocol        = var.worker_private_inbound_acl_rules[count.index]["protocol"]
+  cidr_block      = lookup(var.worker_private_inbound_acl_rules[count.index], "cidr_block", null)
+  ipv6_cidr_block = lookup(var.worker_private_inbound_acl_rules[count.index], "ipv6_cidr_block", null)
+}
+
+resource "aws_network_acl_rule" "worker_private_outbound" {
+  count = var.create_vpc && var.worker_private_dedicated_network_acl && length(var.worker_private_subnets) > 0 ? length(var.worker_private_outbound_acl_rules) : 0
+
+  network_acl_id = aws_network_acl.worker_private[0].id
+
+  egress          = true
+  rule_number     = var.worker_private_outbound_acl_rules[count.index]["rule_number"]
+  rule_action     = var.worker_private_outbound_acl_rules[count.index]["rule_action"]
+  from_port       = lookup(var.worker_private_outbound_acl_rules[count.index], "from_port", null)
+  to_port         = lookup(var.worker_private_outbound_acl_rules[count.index], "to_port", null)
+  icmp_code       = lookup(var.worker_private_outbound_acl_rules[count.index], "icmp_code", null)
+  icmp_type       = lookup(var.worker_private_outbound_acl_rules[count.index], "icmp_type", null)
+  protocol        = var.worker_private_outbound_acl_rules[count.index]["protocol"]
+  cidr_block      = lookup(var.worker_private_outbound_acl_rules[count.index], "cidr_block", null)
+  ipv6_cidr_block = lookup(var.worker_private_outbound_acl_rules[count.index], "ipv6_cidr_block", null)
+}
+
+################################################################################
 # Outpost Network ACLs
 ################################################################################
 
@@ -1051,10 +1152,30 @@ resource "aws_route" "private_nat_gateway" {
   }
 }
 
+resource "aws_route" "worker_private_nat_gateway" {
+  count = var.create_vpc && var.enable_nat_gateway ? local.nat_gateway_count : 0
+
+  route_table_id         = element(aws_route_table.worker_private[*].id, count.index)
+  destination_cidr_block = "0.0.0.0/0"
+  nat_gateway_id         = element(aws_nat_gateway.this[*].id, count.index)
+
+  timeouts {
+    create = "5m"
+  }
+}
+
 resource "aws_route" "private_ipv6_egress" {
   count = var.create_vpc && var.create_egress_only_igw && var.enable_ipv6 ? length(var.private_subnets) : 0
 
   route_table_id              = element(aws_route_table.private[*].id, count.index)
+  destination_ipv6_cidr_block = "::/0"
+  egress_only_gateway_id      = element(aws_egress_only_internet_gateway.this[*].id, 0)
+}
+
+resource "aws_route" "worker_private_ipv6_egress" {
+  count = var.create_vpc && var.create_egress_only_igw && var.enable_ipv6 ? length(var.worker_private_subnets) : 0
+
+  route_table_id              = element(aws_route_table.worker_private[*].id, count.index)
   destination_ipv6_cidr_block = "::/0"
   egress_only_gateway_id      = element(aws_egress_only_internet_gateway.this[*].id, 0)
 }
@@ -1073,12 +1194,22 @@ resource "aws_route_table_association" "private" {
   )
 }
 
+resource "aws_route_table_association" "worker_private" {
+  count = var.create_vpc && length(var.worker_private_subnets) > 0 ? length(var.worker_private_subnets) : 0
+
+  subnet_id = element(aws_subnet.worker_private[*].id, count.index)
+  route_table_id = element(
+    aws_route_table.worker_private[*].id,
+    var.single_nat_gateway ? 0 : count.index,
+  )
+}
+
 resource "aws_route_table_association" "outpost" {
   count = var.create_vpc && length(var.outpost_subnets) > 0 ? length(var.outpost_subnets) : 0
 
   subnet_id = element(aws_subnet.outpost[*].id, count.index)
   route_table_id = element(
-    aws_route_table.private[*].id,
+    coalescelist(aws_route_table.private[*].id, aws_route_table.worker_private[*].id),
     var.single_nat_gateway ? 0 : count.index,
   )
 }
@@ -1088,7 +1219,7 @@ resource "aws_route_table_association" "database" {
 
   subnet_id = element(aws_subnet.database[*].id, count.index)
   route_table_id = element(
-    coalescelist(aws_route_table.database[*].id, aws_route_table.private[*].id),
+    coalescelist(aws_route_table.database[*].id, aws_route_table.private[*].id, aws_route_table.worker_private[*].id),
     var.create_database_subnet_route_table ? var.single_nat_gateway || var.create_database_internet_gateway_route ? 0 : count.index : count.index,
   )
 }
@@ -1098,7 +1229,7 @@ resource "aws_route_table_association" "redshift" {
 
   subnet_id = element(aws_subnet.redshift[*].id, count.index)
   route_table_id = element(
-    coalescelist(aws_route_table.redshift[*].id, aws_route_table.private[*].id),
+    coalescelist(aws_route_table.redshift[*].id, aws_route_table.private[*].id, aws_route_table.worker_private[*].id),
     var.single_nat_gateway || var.create_redshift_subnet_route_table ? 0 : count.index,
   )
 }
@@ -1121,6 +1252,7 @@ resource "aws_route_table_association" "elasticache" {
     coalescelist(
       aws_route_table.elasticache[*].id,
       aws_route_table.private[*].id,
+      aws_route_table.worker_private[*].id,
     ),
     var.single_nat_gateway || var.create_elasticache_subnet_route_table ? 0 : count.index,
   )
@@ -1201,6 +1333,19 @@ resource "aws_vpn_gateway_route_propagation" "private" {
   count = var.create_vpc && var.propagate_private_route_tables_vgw && (var.enable_vpn_gateway || var.vpn_gateway_id != "") ? length(var.private_subnets) : 0
 
   route_table_id = element(aws_route_table.private[*].id, count.index)
+  vpn_gateway_id = element(
+    concat(
+      aws_vpn_gateway.this[*].id,
+      aws_vpn_gateway_attachment.this[*].vpn_gateway_id,
+    ),
+    count.index,
+  )
+}
+
+resource "aws_vpn_gateway_route_propagation" "worker_private" {
+  count = var.create_vpc && var.propagate_worker_private_route_tables_vgw && (var.enable_vpn_gateway || var.vpn_gateway_id != "") ? length(var.worker_private_subnets) : 0
+
+  route_table_id = element(aws_route_table.worker_private[*].id, count.index)
   vpn_gateway_id = element(
     concat(
       aws_vpn_gateway.this[*].id,
