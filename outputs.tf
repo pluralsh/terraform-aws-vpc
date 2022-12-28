@@ -290,7 +290,7 @@ output "database_route_table_ids" {
 
 output "redshift_route_table_ids" {
   description = "List of IDs of redshift route tables"
-  value       = length(aws_route_table.redshift[*].id) > 0 ? aws_route_table.redshift[*].id : (var.enable_public_redshift ? aws_route_table.public[*].id : coalescelist(aws_route_table.private[*].id, aws_route_table.worker_private[*].id))
+  value       = length(aws_route_table.redshift[*].id) > 0 ? aws_route_table.redshift[*].id : (var.enable_public_redshift ? aws_route_table.public[*].id : try(coalescelist(aws_route_table.private[*].id, aws_route_table.worker_private[*].id), []))
 }
 
 output "elasticache_route_table_ids" {
